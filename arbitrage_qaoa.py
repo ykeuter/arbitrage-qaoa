@@ -46,6 +46,13 @@ def get_hamiltonian(rates, m1, m2): # ordered dict
             for j, (x2, y2) in rates.keys:
                 if y2 != a: continue
                 operators.append(pauli_z(m1, i, j))
+    for a in assets:
+        for i, (x1, y1) in rates.keys:
+            if x1 != a: continue
+            operators.append(pauli_z(-m2, i, j))
+            for j, (x2, y2) in rates.keys:
+                if x2 != a: continue
+                operators.append(pauli_z(m2, i, j))
         
     
         
