@@ -21,25 +21,7 @@ def product_pauli_z(q1, q2, coeff, n):
     eye = np.eye((n))
     return Operator([[coeff, Pauli(eye[q1], np.zeros(n)) *
                       Pauli(eye[q2], np.zeros(n))]])
-#%%
-def evolve(hamiltonian, angle, quantum_registers):
-    return hamiltonian.evolve(None, angle, 'circuit', 1,
-                              quantum_registers=quantum_registers,
-                              expansion_mode='suzuki',
-                              expansion_order=3)
 
-def create_circuit(beta, gamma, Hc, Hm, qr, circuit_init, n_qubits):
-    identity = pauli_x(0, 0, n_qubits)
-    p = len(gamma)
-    circuit_evolv = sum([evolve(Hc, beta[i], qr) + evolve(Hm, gamma[i], qr)
-                            for i in range(p)], evolve(identity, 0, qr))
-    circuit = circuit_init + circuit_evolv
-    return circuit
-
-def evaluate_circuit(beta, gamma, Hc, Hm, qr, circuit_init, n_qubits):
-    circuit = create_circuit(beta, gamma, Hc, Hm, qr, circuit_init, n_qubits)
-    return np.real(Hc.eval("matrix", circuit,
-                   get_aer_backend('statevector_simulator'))[0])
 #%%
 def get_cost_hamiltonian(rates, m1, m2): # ordered dict
     n = len(rates)
@@ -59,7 +41,7 @@ def get_cost_hamiltonian(rates, m1, m2): # ordered dict
             for j, (x2, y2) in enumerate(rates.keys()):
                 if y2 != a: continue
                 operators.append(product_pauli_z(i, j, 2 * m1, n))
-        for i, (x1, y1) in rates.keys:
+        for i, (x1, y1) in enumerate(rates.keys()):
             if y1 != a: continue
             for j, (x2, y2) in enumerate(rates.keys()):
                 if y2 != a: continue
@@ -82,6 +64,28 @@ def get_mixing_hamiltonian(n):
     Hm = sum([pauli_x(i, -1, n) for i in range(n)], identity)
     Hm.to_matrix()
     return Hm
+#%%
+def evolve(hamiltonian, angle, quantum_registers):
+    return hamiltonian.evolve(None, angle, 'circuit', 1,
+                              quantum_registers=quantum_registers,
+                              expansion_mode='suzuki',
+                              expansion_order=3)
+
+def create_circuit(beta, gamma, Hc, Hm, qr, circuit_init, n_qubits):
+    identity = pauli_x(0, 0, n_qubits)
+    p = len(gamma)
+    circuit_evolv = sum([evolve(Hc, beta[i], qr) + evolve(Hm, gamma[i], qr)
+                            for i in range(p)], evolve(identity, 0, qr))
+    print("create: ", circuit_evolv.n_qubits)
+    circuit = circuit_init + circuit_evolv
+    print("create2: ", circuit_init.n_qubits, circuit.n_qubits)
+    return circuit
+
+def evaluate_circuit(beta, gamma, Hc, Hm, qr, circuit_init, n_qubits):
+    circuit = create_circuit(beta, gamma, Hc, Hm, qr, circuit_init, n_qubits)
+    print(circuit.n_qubits)
+    return np.real(Hc.eval("matrix", circuit,
+                   get_aer_backend('statevector_simulator'))[0])
 #%%
 c_2_no_arbit = {
     ("EUR", "GBP"): 0.88,
@@ -122,17 +126,19 @@ n = len(rates)
 init_state_vect = [1 for i in range(2 ** n)]
 init_state = Custom(n, state_vector=init_state_vect)
 qr = QuantumRegister(n)
-circuit_init = init_state.construct_circuit('circuit', qr)
+circuit_init = init_state.construct_circuit('circuit')
+qr = circuit_init.qregs[0]
 Hc = get_cost_hamiltonian(rates, 1, 1)
 Hm = get_mixing_hamiltonian(n)
-
-result = minimize(lambda x: evaluate_circuit(x[:(len(x) / 2)],
-                                             x[(len(x) / 2):],
+print(Hc)
+result = minimize(lambda x: evaluate_circuit(x[:p],
+                                             x[p:],
                                              Hc, Hm, qr, circuit_init, n),
                   np.concatenate([beta, gamma]),
                   method='L-BFGS-B')
 
-circuit = create_circuit(result['x'][:p], result['x'][p:])
+circuit = create_circuit(result['x'][:p], result['x'][p:], Hc, Hm, qr,
+                         circuit_init, n)
 
 backend = Aer.get_backend('statevector_simulator')
 job = execute(circuit, backend)
