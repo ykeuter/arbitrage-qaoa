@@ -28,8 +28,7 @@ def get_cost_hamiltonian(rates, m1, m2): # ordered dict
     assets = set(k for k, v in rates.keys())
     operators = []
     for i, r in enumerate(rates.values()):
-        operators.append(pauli_z(i, np.log(r), n))
-    print(rates)
+        operators.append(pauli_z(i, -np.log(r), n))
     for a in assets:
         for i, k in enumerate(rates.keys()):
             print(k)
@@ -37,22 +36,22 @@ def get_cost_hamiltonian(rates, m1, m2): # ordered dict
             if x1 != a: continue
             for j, (x2, y2) in enumerate(rates.keys()):
                 if x2 != a: continue
-                operators.append(product_pauli_z(i, j, -m1, n))
+                operators.append(product_pauli_z(i, j, m1, n))
             for j, (x2, y2) in enumerate(rates.keys()):
                 if y2 != a: continue
-                operators.append(product_pauli_z(i, j, 2 * m1, n))
+                operators.append(product_pauli_z(i, j, -2 * m1, n))
         for i, (x1, y1) in enumerate(rates.keys()):
             if y1 != a: continue
             for j, (x2, y2) in enumerate(rates.keys()):
                 if y2 != a: continue
-                operators.append(product_pauli_z(i, j, -m1, n))
-    for a in assets:
-        for i, (x1, y1) in enumerate(rates.keys()):
-            if x1 != a: continue
-            operators.append(pauli_z(i, m2, n))
-            for j, (x2, y2) in enumerate(rates.keys()):
-                if x2 != a: continue
-                operators.append(product_pauli_z(i, j, -m2, n))
+                operators.append(product_pauli_z(i, j, m1, n))
+    # for a in assets:
+    #     for i, (x1, y1) in enumerate(rates.keys()):
+    #         if x1 != a: continue
+    #         operators.append(pauli_z(i, m2, n))
+    #         for j, (x2, y2) in enumerate(rates.keys()):
+    #             if x2 != a: continue
+    #             operators.append(product_pauli_z(i, j, -m2, n))
     identity = pauli_x(0, 0, n)
     Hc = sum(operators, identity)
     Hc.to_matrix()
@@ -143,5 +142,8 @@ circuit = create_circuit(result['x'][:p], result['x'][p:], Hc, Hm, qr,
 backend = Aer.get_backend('statevector_simulator')
 job = execute(circuit, backend)
 state = np.asarray(job.result().get_statevector(circuit))
+
+#%%
+print(np.absolute(state))
 
 #%%
