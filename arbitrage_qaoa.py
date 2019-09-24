@@ -8,146 +8,77 @@ from qiskit.aqua.components.initial_states import Custom
 from scipy.optimize import minimize
 from collections import OrderedDict
 from qiskit.aqua.operators import WeightedPauliOperator
+from docplex.mp.model import Model
+from qiskit.aqua.translators.ising import docplex
+from qiskit.aqua.algorithms import VQE, ExactEigensolver
+from qiskit.aqua import QuantumInstance
+from qiskit import BasicAer, Aer
+from qiskit.aqua.algorithms import QAOA
+from qiskit.aqua.components.optimizers import COBYLA
 #%%
-# Functions useful if you're using Qiskit
-def pauli_x(q, coeff, n):
-    eye = np.eye((n)) # the i^th row of the identity matrix is 
-                             # the correct parameter for \sigma_i 
-    return WeightedPauliOperator([[coeff, Pauli(np.zeros(n), eye[q])]])
+def get_cost_hamiltonian(rates, m1=1., m2=1.): # ordered dict
+    mdl = Model(name="arbitrage")
+    x = {(a, b): mdl.binary_var(name=a + b) for (a, b) in rates.keys()}
+    fun = mdl.sum(np.log(r) * x[k] for k, r in rates.items())
 
-def pauli_z(q, coeff, n):
-    eye = np.eye((n))
-    return WeightedPauliOperator([[coeff, Pauli(eye[q], np.zeros(n))]])
-
-def product_pauli_z(q1, q2, coeff, n):
-    eye = np.eye((n))
-    return WeightedPauliOperator([[coeff, Pauli(eye[q1], np.zeros(n)) *
-                      Pauli(eye[q2], np.zeros(n))]])
-
-#%%
-H = pauli_z(0, 3, 2)
-print(H.print_details())
-#%%
-rates = OrderedDict(((("USD", "EUR"), 1.), (("EUR", "USD"), 1.1)))
-#%%
-def get_cost_hamiltonian(rates, m1, m2): # ordered dict
-    n = len(rates)
-    assets = set(k for k, v in rates.keys())
-    operators = []
-    for i, r in enumerate(rates.values()):
-        operators.append(pauli_z(i, -np.log(r), n))
-    # for a in assets:
-    #     for i, k in enumerate(rates.keys()):
-    #         print(k)
-    #         x1, y1 = k
-    #         if x1 != a: continue
-    #         for j, (x2, y2) in enumerate(rates.keys()):
-    #             if x2 != a: continue
-    #             operators.append(product_pauli_z(i, j, m1, n))
-    #         for j, (x2, y2) in enumerate(rates.keys()):
-    #             if y2 != a: continue
-    #             operators.append(product_pauli_z(i, j, -2 * m1, n))
-    #     for i, (x1, y1) in enumerate(rates.keys()):
-    #         if y1 != a: continue
-    #         for j, (x2, y2) in enumerate(rates.keys()):
-    #             if y2 != a: continue
-    #             operators.append(product_pauli_z(i, j, m1, n))
-    # for a in assets:
-    #     for i, (x1, y1) in enumerate(rates.keys()):
-    #         if x1 != a: continue
-    #         operators.append(pauli_z(i, m2, n))
-    #         for j, (x2, y2) in enumerate(rates.keys()):
-    #             if x2 != a: continue
-    #             operators.append(product_pauli_z(i, j, -m2, n))
-    identity = pauli_x(0, 0, n)
-    Hc = sum(operators, identity)
-    # Hc.to_matrix()
-    return Hc
-#%%
-def get_mixing_hamiltonian(n):
-    identity = pauli_x(0, 0, n)
-
-    Hm = sum([pauli_x(i, -1, n) for i in range(n)], identity)
-    # Hm.to_matrix()
-    return Hm
-#%%
-def evolve(hamiltonian, angle, quantum_registers):
-    return hamiltonian.evolve(None, angle, 'circuit', 1,
-                              quantum_registers=quantum_registers,
-                              expansion_mode='suzuki',
-                              expansion_order=3)
-
-def create_circuit(beta, gamma, Hc, Hm, qr, circuit_init, n_qubits):
-    identity = pauli_x(0, 0, n_qubits)
-    p = len(gamma)
-    circuit_evolv = sum([evolve(Hc, beta[i], qr) + evolve(Hm, gamma[i], qr)
-                            for i in range(p)], evolve(identity, 0, qr))
-    circuit = circuit_init + circuit_evolv
-    return circuit
-
-def evaluate_circuit(beta, gamma, Hc, Hm, qr, circuit_init, n_qubits):
-    circuit = create_circuit(beta, gamma, Hc, Hm, qr, circuit_init, n_qubits)
-    return np.real(Hc.eval("matrix", circuit,
-                   get_aer_backend('statevector_simulator'))[0])
-#%%
-c_2_no_arbit = {
-    ("EUR", "GBP"): 0.88,
-    ("GBP", "EUR"): 1.13
-}
-
-c_2_yes_arbit = {
-    ("EUR", "GBP"): 0.88,
-    ("GBP", "EUR"): 1.23
-}
-
-c_3_no_arbit = {
-    ("EUR", "GBP"): 0.88,
-    ("GBP", "EUR"): 1.13,
-    ("EUR", "CAD"): 1.47,
-    ("CAD", "EUR"): 0.68,
-    ("GBP", "CAD"): 1.65,
-    ("CAD", "GBP"): 0.6
-}
-
-# GBP -> EUR -> CAD -> GBP makes you money. The other cycles do not.
-c_3_yes_arbit = {
-    ("EUR", "GBP"): 0.88,
-    ("GBP", "EUR"): 1.13,
-    ("EUR", "CAD"): 1.58,
-    ("CAD", "EUR"): 0.61,
-    ("GBP", "CAD"): 1.65,
-    ("CAD", "GBP"): 0.6
-}
+    assets = set(x for x, y in rates.keys())
+    for a in assets:
+        for x1, y1 in rates.keys():
+            if x1 != a: continue
+            for x2, y2 in rates.keys():
+                if x2 != a: continue
+                fun -= m1 * x[(x1, y1)] * x[(x2, y2)]
+            for x2, y2 in rates.keys():
+                if y2 != a: continue
+                fun += 2. * m1 * x[(x1, y1)] * x[(x2, y2)]
+        for x1, y1 in rates.keys():
+            if y1 != a: continue
+            for x2, y2 in rates.keys():
+                if y2 != a: continue
+                fun -= m1 * x[(x1, y1)] * x[(x2, y2)]
+    for a in assets:
+        for x1, y1 in rates.keys():
+            if x1 != a: continue
+            fun += m2 * x[(x1, y1)]
+            for x2, y2 in rates.keys():
+                if x2 != a: continue
+                fun -= m2 * x[(x1, y1)] * x[(x2, y2)]
+    mdl.maximize(fun)
+    operator, _ = docplex.get_qubitops(mdl)
+    return operator
 
 #%%
-rates = rates
-n_iter = 10 # number of iterations of the optimization procedure
+rates = OrderedDict((
+    # (("USD", "EUR"), 1.),
+    # (("EUR", "USD"), 1.1),
+    # (("GBP", "EUR"), 1.),
+    # (("EUR", "GBP"), 1.3),
+    # no arb
+    # (("EUR", "GBP"), 0.88),
+    # (("GBP", "EUR"), 1.13),
+    # (("EUR", "CAD"), 1.47),
+    # (("CAD", "EUR"), 0.68),
+    # (("GBP", "CAD"), 1.65),
+    # (("CAD", "GBP"), 0.6),
+    # GBP -> EUR -> CAD -> GBP makes you money. The other cycles do not.
+    (("EUR", "GBP"), 0.88),
+    (("GBP", "EUR"), 1.13),
+    (("EUR", "CAD"), 1.58),
+    (("CAD", "EUR"), 0.61),
+    (("GBP", "CAD"), 1.65),
+    (("CAD", "GBP"), 0.6),
+))
+op = get_cost_hamiltonian(rates, 1, 1)
+#%%
+ee = ExactEigensolver(op)
+result = ee.run()
+print(bin(result['eigvecs'][0].argmax()))
+#%%
+
 p = 1
-beta = np.random.uniform(0, np.pi*2, p)
-gamma = np.random.uniform(0, np.pi*2, p)
-n = len(rates)
-init_state_vect = [1 for i in range(2 ** n)]
-init_state = Custom(n, state_vector=init_state_vect)
-qr = QuantumRegister(n)
-circuit_init = init_state.construct_circuit('circuit')
-qr = circuit_init.qregs[0]
-m1 = 2.
-m2 = 1.
-Hc = get_cost_hamiltonian(rates, m1, m2)
-Hm = get_mixing_hamiltonian(n)
-result = minimize(lambda x: evaluate_circuit(x[:p],
-                                             x[p:],
-                                             Hc, Hm, qr, circuit_init, n),
-                  np.concatenate([beta, gamma]),
-                  method='L-BFGS-B')
-
-circuit = create_circuit(result['x'][:p], result['x'][p:], Hc, Hm, qr,
-                         circuit_init, n)
-
-backend = Aer.get_backend('statevector_simulator')
-job = execute(circuit, backend)
-state = np.asarray(job.result().get_statevector(circuit))
-
-print(np.absolute(state))
-
-#%%
+optimizer = COBYLA()
+qaoa = QAOA(op, optimizer, p)
+backend = BasicAer.get_backend('statevector_simulator')
+quantum_instance = QuantumInstance(backend)
+r2 = qaoa.run(quantum_instance)
+print(bin(np.absolute(r2['eigvecs'][0]).argmax()))
