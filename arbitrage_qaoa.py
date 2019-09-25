@@ -74,7 +74,6 @@ ee = ExactEigensolver(op)
 result = ee.run()
 print(bin(result['eigvecs'][0].argmax()))
 #%%
-
 p = 1
 optimizer = COBYLA()
 qaoa = QAOA(op, optimizer, p)
